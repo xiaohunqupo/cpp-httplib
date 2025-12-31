@@ -10674,19 +10674,18 @@ TEST(VulnerabilityTest, CRLFInjection) {
 TEST(VulnerabilityTest, CRLFInjectionInHeaders) {
   auto server_thread = std::thread([] {
     auto srv = ::socket(AF_INET, SOCK_STREAM, 0);
-    int on = 1;
-    ::setsockopt(srv, SOL_SOCKET, SO_REUSEADDR,
+
+    httplib::default_socket_options(srv);
 #ifdef _WIN32
-                 reinterpret_cast<const char *>(&on),
-#else
-                 &on,
+    // Setting SO_REUSEADDR seems not to work well with AF_UNIX on windows, so
+    // remove the option.
+    detail::set_socket_opt(srv, SOL_SOCKET, SO_REUSEADDR, 0);
 #endif
-                 sizeof(on));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(PORT);
-    ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    ::inet_pton(AF_INET, HOST, &addr.sin_addr);
     ::bind(srv, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
     ::listen(srv, 1);
 
@@ -10737,7 +10736,7 @@ TEST(VulnerabilityTest, CRLFInjectionInHeaders) {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-  auto cli = httplib::Client("127.0.0.1", PORT);
+  auto cli = httplib::Client(HOST, PORT);
 
   auto headers = httplib::Headers{
       {"A", "B\r\n\r\nGET /pwned HTTP/1.1\r\nHost: 127.0.0.1:1234\r\n\r\n"},
@@ -10745,8 +10744,7 @@ TEST(VulnerabilityTest, CRLFInjectionInHeaders) {
 
   auto res = cli.Get("/hi", headers);
   EXPECT_FALSE(res);
-
-  if (res) { EXPECT_EQ(httplib::Error::InvalidHeaders, res.error()); }
+  EXPECT_EQ(httplib::Error::InvalidHeaders, res.error());
 
   server_thread.join();
 }
